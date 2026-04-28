@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode user-specific files
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+
+# Build products
+DerivedData/
+build/
+*.xcarchive
+
+# Swift Package Manager
+.build/
+
+# App packaging outputs
+*.dmg
+*.zip
