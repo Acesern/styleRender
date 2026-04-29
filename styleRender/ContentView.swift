@@ -14,7 +14,9 @@ struct ContentView: View {
     @State private var selectedModel: ModelSource = .helmet
     @State private var importedModelURL: URL?
     @State private var palette: RenderPalette = .paper
+    @State private var renderStyle: RenderStyle = .obraDinn
     @State private var ditherScale = 72.0
+    @State private var hatchSpacing = 8.0
     @State private var contrast = 1.35
     @State private var showsWireframe = false
     @State private var importError: String?
@@ -28,7 +30,9 @@ struct ContentView: View {
                     selectedModel: selectedModel,
                     importedModelURL: importedModelURL,
                     palette: palette,
+                    renderStyle: renderStyle,
                     ditherScale: Float(ditherScale),
+                    hatchSpacing: Float(hatchSpacing),
                     contrast: Float(contrast),
                     showsWireframe: showsWireframe
                 )
@@ -56,11 +60,20 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("风格化渲染")
                         .font(.title2.weight(.semibold))
-                    Text("单色高反差、棋盘抖动、淡色纸底，模拟《Return of the Obra Dinn》的低位深复古观感。")
+                    Text(renderStyle == .obraDinn
+                         ? "单色高反差、棋盘抖动、淡色纸底，模拟《Return of the Obra Dinn》的低位深复古观感。"
+                         : "密集交叉阴影线，模拟 Gustave Doré《神曲》铜版画风格。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Picker("渲染风格", selection: $renderStyle) {
+                    ForEach(RenderStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
 
                 Picker("模型", selection: $selectedModel) {
                     ForEach(ModelSource.allCases) { model in
@@ -92,11 +105,20 @@ struct ContentView: View {
                     }
                 }
 
-                VStack(alignment: .leading) {
-                    Text("抖动密度 \(Int(ditherScale))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Slider(value: $ditherScale, in: 36...140)
+                if renderStyle == .obraDinn {
+                    VStack(alignment: .leading) {
+                        Text("抖动密度 \(Int(ditherScale))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Slider(value: $ditherScale, in: 36...140)
+                    }
+                } else {
+                    VStack(alignment: .leading) {
+                        Text("线条间距 \(hatchSpacing, specifier: "%.1f")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Slider(value: $hatchSpacing, in: 3.0...18.0)
+                    }
                 }
 
                 VStack(alignment: .leading) {
@@ -175,6 +197,22 @@ enum ModelSource: String, CaseIterable, Identifiable {
     }
 }
 
+enum RenderStyle: String, CaseIterable, Identifiable {
+    case obraDinn
+    case dore
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .obraDinn:
+            "Obra Dinn"
+        case .dore:
+            "Doré 版画"
+        }
+    }
+}
+
 enum RenderPalette: String, CaseIterable, Identifiable {
     case paper
     case amber
@@ -231,7 +269,9 @@ struct ObraDinnSceneView: NSViewRepresentable {
     let selectedModel: ModelSource
     let importedModelURL: URL?
     let palette: RenderPalette
+    let renderStyle: RenderStyle
     let ditherScale: Float
+    let hatchSpacing: Float
     let contrast: Float
     let showsWireframe: Bool
 
@@ -257,7 +297,9 @@ struct ObraDinnSceneView: NSViewRepresentable {
             selectedModel: selectedModel,
             importedModelURL: importedModelURL,
             palette: palette,
+            renderStyle: renderStyle,
             ditherScale: ditherScale,
+            hatchSpacing: hatchSpacing,
             contrast: contrast,
             showsWireframe: showsWireframe
         )
@@ -270,6 +312,7 @@ struct ObraDinnSceneView: NSViewRepresentable {
         private let cameraNode = SCNNode()
         private var currentModel: ModelSource?
         private var currentURL: URL?
+        private var currentRenderStyle: RenderStyle = .obraDinn
 
         init() {
             scene.rootNode.addChildNode(modelRoot)
@@ -288,14 +331,35 @@ struct ObraDinnSceneView: NSViewRepresentable {
             selectedModel: ModelSource,
             importedModelURL: URL?,
             palette: RenderPalette,
+            renderStyle: RenderStyle,
             ditherScale: Float,
+            hatchSpacing: Float,
             contrast: Float,
             showsWireframe: Bool
         ) {
-            sceneView.backgroundColor = RenderPalette.paper.background
-            sceneView.technique?.setValue(ditherScale, forKey: "ditherScale")
-            sceneView.technique?.setValue(contrast, forKey: "contrast")
-            sceneView.technique?.setValue(palette.shaderIndex, forKey: "paletteIndex")
+            if renderStyle != currentRenderStyle {
+                currentRenderStyle = renderStyle
+                switch renderStyle {
+                case .obraDinn:
+                    sceneView.technique = Self.makeObraDinnTechnique()
+                case .dore:
+                    sceneView.technique = Self.makeDoréTechnique()
+                }
+            }
+
+            switch renderStyle {
+            case .obraDinn:
+                sceneView.backgroundColor = RenderPalette.paper.background
+                sceneView.technique?.setValue(ditherScale, forKey: "ditherScale")
+                sceneView.technique?.setValue(contrast, forKey: "contrast")
+                sceneView.technique?.setValue(palette.shaderIndex, forKey: "paletteIndex")
+            case .dore:
+                sceneView.backgroundColor = NSColor(calibratedRed: 0.867, green: 0.831, blue: 0.690, alpha: 1)
+                sceneView.technique?.setValue(hatchSpacing, forKey: "hatchSpacing")
+                sceneView.technique?.setValue(contrast, forKey: "contrast")
+                sceneView.technique?.setValue(palette.shaderIndex, forKey: "paletteIndex")
+            }
+
             sceneView.debugOptions = showsWireframe ? [.showWireframe] : []
             sceneView.needsDisplay = true
 
@@ -456,6 +520,89 @@ struct ObraDinnSceneView: NSViewRepresentable {
                                 "wrapT": "clamp"
                             ],
                             "ditherScale": "ditherScale",
+                            "contrast": "contrast",
+                            "paletteIndex": "paletteIndex"
+                        ],
+                        "outputs": [
+                            "color": "COLOR"
+                        ],
+                        "colorStates": [
+                            "clear": true
+                        ],
+                        "depthStates": [
+                            "enableRead": false,
+                            "enableWrite": false
+                        ]
+                    ]
+                ]
+            ]
+
+            return SCNTechnique(dictionary: dictionary)
+        }
+
+        private static func makeDoréTechnique() -> SCNTechnique? {
+            let dictionary: [String: Any] = [
+                "sequence": ["scene", "stylize"],
+                "targets": [
+                    "sceneColor": [
+                        "type": "color",
+                        "format": "rgba8"
+                    ],
+                    "sceneDepth": [
+                        "type": "depth",
+                        "format": "depth32f"
+                    ]
+                ],
+                "symbols": [
+                    "hatchSpacing": [
+                        "type": "float"
+                    ],
+                    "contrast": [
+                        "type": "float"
+                    ],
+                    "paletteIndex": [
+                        "type": "float"
+                    ]
+                ],
+                "passes": [
+                    "scene": [
+                        "draw": "DRAW_SCENE",
+                        "outputs": [
+                            "color": "sceneColor",
+                            "depth": "sceneDepth"
+                        ],
+                        "colorStates": [
+                            "clear": true,
+                            "clearColor": "1 1 1 1"
+                        ],
+                        "depthStates": [
+                            "clear": true,
+                            "enableWrite": true,
+                            "enableRead": true
+                        ]
+                    ],
+                    "stylize": [
+                        "draw": "DRAW_QUAD",
+                        "metalVertexShader": "obraDinnVertex",
+                        "metalFragmentShader": "doreFragment",
+                        "inputs": [
+                            "colorSampler": [
+                                "target": "sceneColor",
+                                "minificationFilter": "nearest",
+                                "magnificationFilter": "nearest",
+                                "mipFilter": "none",
+                                "wrapS": "clamp",
+                                "wrapT": "clamp"
+                            ],
+                            "depthSampler": [
+                                "target": "sceneDepth",
+                                "minificationFilter": "nearest",
+                                "magnificationFilter": "nearest",
+                                "mipFilter": "none",
+                                "wrapS": "clamp",
+                                "wrapT": "clamp"
+                            ],
+                            "hatchSpacing": "hatchSpacing",
                             "contrast": "contrast",
                             "paletteIndex": "paletteIndex"
                         ],
